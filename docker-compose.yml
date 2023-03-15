@@ -1,0 +1,100 @@
+version: '3'
+
+services:
+  php:
+    build:
+      context: .
+      dockerfile: ./Docker/httpd/Dockerfile
+      args:
+        APACHEUSER: ${APACHE_USER}
+        WITH_XDEBUG: ${WITH_XDEBUG}
+        PHP_VER: 7.4
+        FAKE_SENDMAIL: ${FAKE_SENDMAIL}
+    hostname: ${VIRTUAL_HOST}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker/sock
+      - ./html:/var/www/
+      - ./Docker/httpd/php_additional.ini:/usr/local/etc/php/conf.d/php_additional.ini
+      - ./Docker/httpd/mail:/var/mail
+      - ./Docker/httpd/sendmail.sh:/home/sendmail.sh
+      - ./Docker/httpd/fakemail2.php:/home/fakemail2.php
+    links:
+      - db
+    expose:
+      - 80
+      - 443
+    depends_on:
+      - db
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5000k"
+        max-file: "10"
+    environment:
+      APACHE_RUN_USER: ${APACHE_USER}
+      APACHE_RUN_GROUP: ${APACHE_USER}
+      VIRTUAL_HOST: ${VIRTUAL_HOST}
+      LETSENCRYPT_HOST: ${VIRTUAL_HOST}
+      VIRTUAL_PORT: 443
+      VIRTUAL_PROTO: https
+      HTTPS_METHOD: "noredirect"
+      LETSENCRYPT_EMAIL: admin@${VIRTUAL_HOST}
+      FAKE_SENDMAIL: ${FAKE_SENDMAIL}
+      PHP_IDE_CONFIG: "serverName=Docker"
+
+  db:
+    image: mariadb:10.1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5000k"
+        max-file: "10"
+    expose:
+      - 3306
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+    restart: unless-stopped
+    command: "--innodb_thread_concurrency=0 --tmp_table_size=512M --max_heap_table_size=512M --innodb_buffer_pool_size=1G --thread_cache=256 --key_buffer_size=256M --max_connections=400 --thread_cache_size=256 --max_allowed_packet=512M --query_cache_size=100MB --query_cache_type=1 --table_open_cache=1024 --table_definition_cache=1024"
+    volumes:
+      - ./Docker/mariadb:/var/lib/mysql
+      - ./Docker/sql:/var/sql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      TCP_PORT: "${VIRTUAL_HOST}:3306"
+
+  pma:
+    image: phpmyadmin/phpmyadmin
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5000k"
+        max-file: "10"
+    expose:
+      - 80
+    links:
+      - db
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      PMA_HOST: db
+      PMA_USER: root
+      PMA_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      VIRTUAL_HOST: ${PMA_VIRTUAL_HOST}
+
+networks:
+  default:
+    external:
+      name: nginx-proxy
